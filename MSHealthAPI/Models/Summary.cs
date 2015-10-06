@@ -1,4 +1,5 @@
-﻿using System;
+﻿using MSHealthAPI.Controllers;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Web;
@@ -7,10 +8,14 @@ namespace MSHealthAPI.Models
 {
     public class Summary
     {
+        private DateTimeOffset _startTime;
+        private DateTimeOffset _endTime;
+        private DateTimeOffset _parentDay;
+
         public string userId { get; set; }
-        public DateTime startTime { get; set; }
-        public DateTime endTime { get; set; }
-        public DateTime parentDay { get; set; }
+        public DateTimeOffset startTime { get { return _startTime; } set { _startTime = value.ToOffset(MSHealthController.timezoneOffset); } }
+        public DateTimeOffset endTime { get { return _endTime; } set { _endTime = value.ToOffset(MSHealthController.timezoneOffset); } }
+        public DateTimeOffset parentDay { get { return _endTime.Date; } set { _parentDay = value; } }
         public bool isTransitDay { get; set; }
         public string period { get; set; }
         public string duration { get; set; }

@@ -21,6 +21,8 @@ namespace MSHealthAPI.Controllers
     {
         public static OAuthResponse authorization;
         private AuthenticationController tokenHandler = new AuthenticationController();
+        internal static TimeSpan timezoneOffset;
+
         //CloudIsolatedStorage storage = Runtime.FromAppSettings().IsolatedStorage;
 
 
@@ -29,8 +31,10 @@ namespace MSHealthAPI.Controllers
         [HttpGet, Route("api/TriggerOnDeviceSync")]
         [Trigger(TriggerType.Poll, typeof(SummaryResponse))]
         [Metadata("Trigger on Device Sync", "On a device sync, will return hourly summaries up to sync hour")]
-        public async Task<HttpResponseMessage> TriggerOnDeviceSynce(string triggerState)
+        public async Task<HttpResponseMessage> TriggerOnDeviceSynce(string triggerState,
+            [Metadata("Timezone Offset", "Timezone offset for desired return time (e.g. -7 for Pacific Daylight Time)", VisibilityType.Default)] int offset = 0)
         {
+            timezoneOffset = new TimeSpan(offset, 0, 0);
             if (string.IsNullOrEmpty(triggerState))
                 triggerState = DateTime.UtcNow.AddDays(-1).ToString("o");
             else
@@ -55,7 +59,7 @@ namespace MSHealthAPI.Controllers
                 if (lastSyncedBand == null || lastSyncedBand < DateTime.Parse(triggerState).ToUniversalTime())
                     return Request.EventWaitPoll(null, triggerState);
 
-                var result = await client.GetAsync(string.Format("https://api.microsofthealth.net/v1/me/Summaries/{0}?startTime={1}&endTime={2}", "Hourly", triggerState, lastSyncedBand.ToUniversalTime().ToString("o")));
+                var result = await client.GetAsync(string.Format("https://api.microsofthealth.net/v1/me/Summaries/{0}?startTime={1}&endTime={2}", "Hourly", DateTime.Parse(triggerState).ToUniversalTime().ToString("o"),lastSyncedBand.ToUniversalTime().ToString("o")));
                 var sumResponse = new SummaryResponse(JsonConvert.DeserializeObject<Summaries>((await result.Content.ReadAsStringAsync())), 1, lastSyncedBand);
                 if (sumResponse.rows == null || sumResponse.rows.FirstOrDefault() == null)
                     return Request.EventWaitPoll(null, triggerState);
@@ -68,9 +72,11 @@ namespace MSHealthAPI.Controllers
         [HttpGet, Route("api/GetHourlySummary")]
         [Trigger(TriggerType.Poll, typeof(SummaryResponse))]
         [Metadata("Get Hourly Summary")]
-        public async Task<HttpResponseMessage> GetHourlySummary(string triggerState, 
+        public async Task<HttpResponseMessage> GetHourlySummary(string triggerState,
+            [Metadata("Timezone Offset", "Timezone offset for desired return time (e.g. -7 for Pacific Daylight Time)", VisibilityType.Default)] int offset = 0,
             [Metadata("Delay", "How many hours to delay results. This is to help offset the time it takes to sync with your band.  Defaults to 1, must be >= 1.", VisibilityType.Advanced)] int delay = 1)
-        { 
+        {
+            timezoneOffset = new TimeSpan(offset, 0, 0);
             if (string.IsNullOrEmpty(triggerState))
                 triggerState = DateTime.UtcNow.AddDays(-1).ToString("o");
             else
@@ -92,7 +98,7 @@ namespace MSHealthAPI.Controllers
             using (var client = new HttpClient())
             {
                 client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authorization.access_token);
-                var result = await client.GetAsync(string.Format("https://api.microsofthealth.net/v1/me/Summaries/{0}?startTime={1}", "Hourly", triggerState));
+                var result = await client.GetAsync(string.Format("https://api.microsofthealth.net/v1/me/Summaries/{0}?startTime={1}", "Hourly", DateTime.Parse(triggerState).ToUniversalTime().ToString("o")));
                 return Request.EventTriggered( new SummaryResponse(JsonConvert.DeserializeObject<Summaries>((await result.Content.ReadAsStringAsync())), delay)  , triggerState = DateTime.UtcNow.ToString("o"));
             }
         }
@@ -101,8 +107,10 @@ namespace MSHealthAPI.Controllers
         [HttpGet, Route("api/TriggerOnActivity")]
         [Trigger(TriggerType.Poll, typeof(ActivityResponse))]
         [Metadata("Trigger on Activity")]
-        public async Task<HttpResponseMessage> TriggerOnActivity(string triggerState)
+        public async Task<HttpResponseMessage> TriggerOnActivity(string triggerState,
+            [Metadata("Timezone Offset", "Timezone offset for desired return time (e.g. -7 for Pacific Daylight Time)", VisibilityType.Default)] int offset = 0)
         {
+            timezoneOffset = new TimeSpan(offset, 0, 0);
             if (string.IsNullOrEmpty(triggerState))
                 triggerState = DateTime.UtcNow.ToString("o");
             else
@@ -119,9 +127,10 @@ namespace MSHealthAPI.Controllers
             using (var client = new HttpClient())
             {
                 client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authorization.access_token);
-                var result = await client.GetAsync(string.Format("https://api.microsofthealth.net/v1/me/Activities?startTime={0}", triggerState));
+                var result = await client.GetAsync(string.Format("https://api.microsofthealth.net/v1/me/Activities?startTime={0}", DateTime.Parse(triggerState).AddDays(-1).ToUniversalTime().ToString("o")));
                 string content = await result.Content.ReadAsStringAsync();
                 ActivityList resultList = JsonConvert.DeserializeObject<ActivityList>(content);
+                resultList.EndTimeInclusive(DateTime.Parse(triggerState).ToUniversalTime(), DateTime.UtcNow);
                 if (resultList.NoActivities())
                     return Request.EventWaitPoll(null, triggerState);
                 else
@@ -132,9 +141,11 @@ namespace MSHealthAPI.Controllers
         [Swashbuckle.Swagger.Annotations.SwaggerResponse(HttpStatusCode.OK, "MSHealth Activity Result", typeof(ActivityResponse))]
         [HttpGet, Route("api/GetActivites")]
         [Metadata("Get Activites", "Returns a set of activities and their data from Microsoft Health")]
-        public async Task<HttpResponseMessage> GetActivites( [Metadata("Activities After Time", "Will return all activities that ended after the time passed in.")] string activityTime, 
+        public async Task<HttpResponseMessage> GetActivites([Metadata("Activities After Time", "Will return all activities that ended after the time passed in.")] string activityTime,
+            [Metadata("Timezone Offset", "Timezone offset for desired return time (e.g. -7 for Pacific Daylight Time)", VisibilityType.Default)] int offset = 0,
             [Required(AllowEmptyStrings = true)][Metadata("Activites Before Time", "An end-time cap into the activities returned", VisibilityType.Advanced)] string endTime = null)
         {
+            timezoneOffset = new TimeSpan(offset, 0, 0);
             string startTime;
             if (string.IsNullOrEmpty(activityTime))
                 startTime = DateTime.UtcNow.AddDays(-1).ToString("o");
@@ -151,7 +162,7 @@ namespace MSHealthAPI.Controllers
             using (var client = new HttpClient())
             {
                 client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authorization.access_token);
-                var result = await client.GetAsync(string.Format("https://api.microsofthealth.net/v1/me/Activities?startTime={0}", startTime));
+                var result = await client.GetAsync(string.Format("https://api.microsofthealth.net/v1/me/Activities?startTime={0}", DateTime.Parse(startTime).ToUniversalTime().ToString("o")));
                 string content = await result.Content.ReadAsStringAsync();
                 ActivityList resultList = JsonConvert.DeserializeObject<ActivityList>(content);
                 resultList.EndTimeInclusive(DateTime.Parse(activityTime).ToUniversalTime(), DateTime.Parse(endTime).ToUniversalTime());
